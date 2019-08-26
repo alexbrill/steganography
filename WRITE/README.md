@@ -15,4 +15,4 @@ Output: program's folder (result.wav)
 6. make steganography
 
 
-!(pic)[https://sun9-45.userapi.com/c852228/v852228941/1b1481/rZdwx0UpW5A.jpg]
+![pic](https://sun9-45.userapi.com/c852228/v852228941/1b1481/rZdwx0UpW5A.jpg)
