@@ -1,6 +1,6 @@
 
 
-
+--write data to file
 local function write(filename, contents)
   local fh = assert(io.open(filename, "wb"))
   fh:write(contents)
@@ -8,79 +8,113 @@ local function write(filename, contents)
   fh:close()
 end
 
-
+--read data from file
 local function getData(filename)
   local file = io.open(filename, "rb")
   str = file:read("*a")
-  file:close()
-  
+  file:close()  
   return str
 end
 
-
-
-local function decodeInt(buffer, density, ind_cur)
-
+--get INT value from track's samples with specified density
+local function decodeInt(buffer, density, ind_cur, shift)
   local cont_shift = 0
-  local ind_buf = 44
-  local data_size = 0
+  local numb = 0
   local data_shift = 0
+  local extra_shift = 0
+  local extra_ind = 0  
   for i=0, 31 do
-    local temp = bit32.band(buffer:byte(ind_cur+1), bit32.lshift(1, cont_shift))
+    local temp = bit32.band(buffer:byte(ind_cur + extra_ind), bit32.lshift(1, cont_shift))
     if temp ~= 0 then
-      data_size = bit32.bor(data_size, bit32.lshift(1, data_shift))
-    end    
+      numb = numb + bit32.lshift(1, data_shift)
+    end        
     data_shift = data_shift + 1
-    cont_shift = (cont_shift + 1) % density
-    if cont_shift == 0 then
-      ind_cur = ind_cur + 1
+    extra_shift = (extra_shift + 1) % density
+    extra_ind = math.floor(extra_shift / 8)
+    cont_shift = extra_shift % 8      
+    if extra_shift == 0 then
+      ind_cur = ind_cur + shift
     end
   end
-  return data_size
+  return numb, ind_cur
 end
 
-
-local function decodeBytes(buffer, density, ind_cur, ind_end)
+--get N bytes from track's samples with specified density
+local function decodeBytes(buffer, density, ind_cur, N, shift)
   local count = 0
   local str = ""
-  while ind_cur < ind_end do
-    local cont_shift = 0  
+  local cont_shift = 0  
+  local extra_shift = 0
+  local data_shift = 0  
+  local extra_ind = 0
+  
+  for i = 0, N-1 do        
     local char = 0
-    local data_shift = 0    
-    for i=0, 7 do
-      local temp = bit32.band(buffer:byte(ind_cur+1), bit32.lshift(1, cont_shift))
+    for i = 0, 7 do
+      local temp = bit32.band(buffer:byte(ind_cur + extra_ind), bit32.lshift(1, cont_shift))
       if temp ~= 0 then
-        char = bit32.bor(char, bit32.lshift(1, data_shift))
+        char = char + bit32.lshift(1, data_shift)
       end      
-      data_shift = data_shift + 1
-      cont_shift = (cont_shift + 1) % density
-      if cont_shift == 0 then
-        ind_cur = ind_cur + 1
-      end
+      data_shift = (data_shift + 1) % 8
+      extra_shift = (extra_shift + 1) % density
+      extra_ind = math.floor(extra_shift / 8)
+      cont_shift = extra_shift % 8
+      if extra_shift == 0 then
+        ind_cur = ind_cur + shift
+      end      
     end
-    count = count + 1
     str = str .. string.char(char)
   end
-  return str
+  return str, ind_cur
+end
+
+--get value of density
+--number 44 is taken from the WAV-file's stucture (data block start)
+local function decodeDensity(buffer, shift)
+  density = 0 
+  for i = 0, 4 do
+    if bit32.band(buffer:byte(44 + 1 + shift * i), 1) == 1 then 
+      density = density + (bit32.lshift(1, i))
+    end
+  end
+  return density + 1  
+end
+
+--get track's bits per second value
+--number 34 is taken from the WAV-file's stucture
+local function getBPS(buffer)
+  bps = buffer:byte(34 + 1)
+  bps = bps + bit32.lshift(buffer:byte(36), 8)  
+  return bps
 end
 
 
-DecodeToFile = function(path, density)
-  DATA_START = 44
+DecodeToFile = function(pathToFile, pathToDecode)
+  --44 + 
+  DATA_START = 45
+  NAME_SIZE = 20  
   INT_SIZE = 32
-  CHAR_SIZE = 8
-  NAME_SIZE = 20
-  buffer = getData("D:\\my_documents\\Workplace\\lua_code\\result.wav")
-  text_size = decodeInt(buffer, density, DATA_START) 
-  NAME_START = DATA_START + (INT_SIZE / density)
-  TEXT_START = NAME_START + ((NAME_SIZE * CHAR_SIZE) / density)
-  TEXT_END = TEXT_START + (((tonumber(text_size) - 24) * CHAR_SIZE) / density)
-  name = decodeBytes(buffer, density, NAME_START, TEXT_START)  
-  text = decodeBytes(buffer, density, TEXT_START, TEXT_END)
-
-  write("D:\\program_files_2\\foobar\\components\\music.txt", text)
-
-  return "OK"
+  BYTE_SIZE = 8
+  DEN_SIZE = 5
+  
+  if pathToDecode == nil then
+    pathToDecode = "D:\\new\\"
+  end
+  
+  buffer = getData(pathToFile)  
+  BPS = getBPS(buffer)    
+  BPS_BYTES = BPS / BYTE_SIZE
+  density = decodeDensity(buffer, BPS_BYTES)
+  mark, ind = decodeInt(buffer, density, DATA_START + BPS_BYTES * DEN_SIZE, BPS_BYTES)
+  
+  if mark == 111111 then
+    text_size, ind = decodeInt(buffer, density, ind, BPS_BYTES)
+    name, ind = decodeBytes(buffer, density, ind, NAME_SIZE, BPS_BYTES)
+    text = decodeBytes(buffer, density, ind, (tonumber(text_size) - 32) , BPS_BYTES)
+    write(pathToDecode .. name, text)    
+    return pathToDecode .. name
+  else
+    return "ERROR"
+  end
 end
-
 
